@@ -174,8 +174,9 @@ type statsWorkerKey struct {
 type telemetryService struct {
 	AnalyticsService
 
-	notifier  webhook.QueuedNotifier
-	jobsQueue *utils.OpsQueue
+	notifier     webhook.QueuedNotifier
+	jobsQueue    *utils.OpsQueue
+	hiMarketSink *hiMarketMeteringSink
 
 	workersMu  sync.RWMutex
 	workers    map[statsWorkerKey]*StatsWorker
@@ -188,6 +189,7 @@ func NewTelemetryService(notifier webhook.QueuedNotifier, analytics AnalyticsSer
 	t := &telemetryService{
 		AnalyticsService: analytics,
 		notifier:         notifier,
+		hiMarketSink:     newHiMarketMeteringSinkFromEnv(),
 		jobsQueue: utils.NewOpsQueue(utils.OpsQueueParams{
 			Name:        "telemetry",
 			MinSize:     jobsQueueMinSize,
@@ -215,7 +217,13 @@ func (t *telemetryService) FlushStats() {
 	var prev, reap *StatsWorker
 	for worker != nil {
 		next := worker.next
-		if closed := worker.Flush(now, workerCleanupWait); closed {
+		closed := worker.Flush(now, workerCleanupWait)
+		if t.hiMarketSink != nil {
+			if ev, ok := worker.DrainHiMarketEvent(false); ok {
+				t.hiMarketSink.Send(context.Background(), ev)
+			}
+		}
+		if closed {
 			if prev == nil {
 				// this worker was at the head of the list
 				t.workersMu.Lock()

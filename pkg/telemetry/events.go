@@ -85,7 +85,7 @@ func (t *telemetryService) ParticipantJoined(
 	guard *ReferenceGuard,
 ) {
 	t.enqueue(func() {
-		_, found := t.getOrCreateWorker(
+		worker, found := t.getOrCreateWorker(
 			ctx,
 			livekit.RoomID(room.Sid),
 			livekit.RoomName(room.Name),
@@ -93,6 +93,13 @@ func (t *telemetryService) ParticipantJoined(
 			livekit.ParticipantIdentity(participant.Identity),
 			guard,
 		)
+		if participant != nil {
+			var joined time.Time
+			if participant.JoinedAt > 0 {
+				joined = time.Unix(participant.JoinedAt, 0)
+			}
+			worker.SetParticipantMeta(participant.Attributes, joined)
+		}
 		if !found {
 			prometheus.IncrementParticipantRtcConnected(1, clientInfo.GetSdk())
 			prometheus.AddParticipant()
@@ -136,6 +143,13 @@ func (t *telemetryService) ParticipantActive(
 		)
 		if !found {
 			prometheus.AddParticipant()
+		}
+		if participant != nil {
+			var joined time.Time
+			if participant.JoinedAt > 0 {
+				joined = time.Unix(participant.JoinedAt, 0)
+			}
+			worker.SetParticipantMeta(participant.Attributes, joined)
 		}
 		worker.SetConnected()
 		prometheus.IncrementParticipantRtcActive(1, isWarp)
@@ -193,9 +207,18 @@ func (t *telemetryService) ParticipantLeft(ctx context.Context,
 	t.enqueue(func() {
 		isConnected := false
 		if worker, ok := t.getWorker(livekit.RoomID(room.Sid), livekit.ParticipantID(participant.Sid)); ok {
+			if participant != nil {
+				worker.SetParticipantMeta(participant.Attributes, time.Time{})
+			}
 			isConnected = worker.IsConnected()
 			if worker.Close(guard) {
 				prometheus.SubParticipant()
+				_ = worker.Flush(time.Now(), 0)
+				if t.hiMarketSink != nil {
+					if ev, ok := worker.DrainHiMarketEvent(true); ok {
+						t.hiMarketSink.Send(ctx, ev)
+					}
+				}
 			} else {
 				logger.Infow(
 					"stats worker active",

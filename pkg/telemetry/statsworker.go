@@ -16,6 +16,7 @@ package telemetry
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 	"unsafe"
@@ -83,11 +84,19 @@ type StatsWorker struct {
 	participantIdentity livekit.ParticipantIdentity
 	isConnected         bool
 
-	lock             sync.RWMutex
-	outgoingPerTrack map[livekit.TrackID][]*livekit.AnalyticsStat
-	incomingPerTrack map[livekit.TrackID][]*livekit.AnalyticsStat
-	refCount         ReferenceCount
-	closedAt         time.Time
+	lock                sync.RWMutex
+	outgoingPerTrack    map[livekit.TrackID][]*livekit.AnalyticsStat
+	incomingPerTrack    map[livekit.TrackID][]*livekit.AnalyticsStat
+	refCount            ReferenceCount
+	closedAt            time.Time
+	joinedAt            time.Time
+	attributes          map[string]string
+	cumulativeUpBytes   uint64
+	cumulativeDownBytes uint64
+	reportedUpBytes     uint64
+	reportedDownBytes   uint64
+	flushSeq            uint64
+	finalEmitted        bool
 }
 
 func newStatsWorker(
@@ -134,7 +143,30 @@ func (s *StatsWorker) SetConnected() {
 
 	s.lock.Lock()
 	s.isConnected = true
+	if s.joinedAt.IsZero() {
+		s.joinedAt = time.Now()
+	}
 	s.lock.Unlock()
+}
+
+func (s *StatsWorker) SetParticipantMeta(attrs map[string]string, joinedAt time.Time) {
+	if s == nil {
+		return
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.joinedAt.IsZero() && !joinedAt.IsZero() {
+		s.joinedAt = joinedAt
+	}
+	if len(attrs) > 0 {
+		if s.attributes == nil {
+			s.attributes = maps.Clone(attrs)
+		} else {
+			for k, v := range attrs {
+				s.attributes[k] = v
+			}
+		}
+	}
 }
 
 func (s *StatsWorker) IsConnected() bool {
@@ -211,6 +243,15 @@ func (s *StatsWorker) collectStats(
 		coalesced.RoomId = string(s.roomID)
 		coalesced.ParticipantId = string(s.participantID)
 		coalesced.RoomName = string(s.roomName)
+		if ps, ok := CondenseStat(coalesced); ok {
+			s.lock.Lock()
+			if streamType == livekit.StreamType_UPSTREAM {
+				s.cumulativeUpBytes += ps.Bytes
+			} else if streamType == livekit.StreamType_DOWNSTREAM {
+				s.cumulativeDownBytes += ps.Bytes
+			}
+			s.lock.Unlock()
+		}
 		stats = append(stats, coalesced)
 	}
 	return stats
