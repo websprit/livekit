@@ -282,6 +282,7 @@ func (t *telemetryService) TrackPublished(
 ) {
 	t.enqueue(func() {
 		prometheus.AddPublishedTrack(track.Type.String())
+		prometheus.AddPacketTrailerTrack(track)
 		prometheus.RecordTrackPublishSuccess(track.Type.String())
 		if !shouldSendEvent {
 			return
@@ -413,6 +414,7 @@ func (t *telemetryService) TrackUnpublished(
 	t.enqueue(func() {
 		if wasPublishedLocally {
 			prometheus.SubPublishedTrack(track.Type.String())
+			prometheus.SubPacketTrailerTrack(track)
 		}
 		if !shouldSendEvent {
 			return

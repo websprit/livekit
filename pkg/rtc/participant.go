@@ -901,6 +901,9 @@ func (p *ParticipantImpl) SetPermission(permission *livekit.ParticipantPermissio
 		for _, st := range p.SubscriptionManager.GetSubscribedTracks() {
 			st.MediaTrack().RemoveSubscriber(p.ID(), false)
 		}
+		for _, ddt := range p.SubscriptionManager.GetSubscribedDataTracks() {
+			ddt.PublishDataTrack().RemoveSubscriber(p.ID())
+		}
 	}
 
 	if !grants.Video.GetCanPublishData() {
@@ -2641,6 +2644,9 @@ func (p *ParticipantImpl) handleReceivedDataMessage(kind livekit.DataPacket_Kind
 				Message: res.Error.GetMessage(),
 				Data:    res.Error.GetData(),
 			})
+		default:
+			// Unknown response encoding: still forwarded downstream, logged as a canary.
+			p.pubLogger.Warnw("unhandled RPC response value type", nil, "rpc_request_id", rpcResponse.GetRequestId())
 		}
 	case *livekit.DataPacket_RpcAck:
 		if payload.RpcAck == nil {

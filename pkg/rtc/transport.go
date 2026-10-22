@@ -1709,6 +1709,9 @@ func (t *PCTransport) HandleRemoteDescription(sd webrtc.SessionDescription, remo
 			return err
 		}
 		t.setRemoteOfferParsed(sd.Type, parsed)
+		if sd.Type == webrtc.SDPTypeOffer {
+			t.params.Handler.OnSetRemoteDescriptionOffer()
+		}
 
 		rtxRepairs := nonSimulcastRTXRepairsFromSDP(parsed, t.params.Logger)
 		if len(rtxRepairs) > 0 {
@@ -3308,6 +3311,10 @@ func (t *PCTransport) restrictReceiverCodecsToPublishList() {
 	for _, tr := range t.pc.GetTransceivers() {
 		if tr.Direction() != webrtc.RTPTransceiverDirectionRecvonly &&
 			tr.Direction() != webrtc.RTPTransceiverDirectionSendrecv {
+			continue
+		}
+		// a mid-less sender is not negotiated yet, see sendersPendingConfig
+		if tr.Mid() == "" {
 			continue
 		}
 		receiver := tr.Receiver()
